@@ -3,10 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 import tensorflow as tf
 import numpy as np
 import cv2
+import os
 
 app = FastAPI()
 
-# ✅ CORS para que tu frontend pueda llamar la API
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -14,8 +15,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Cargar modelo una sola vez al iniciar
-model = tf.keras.models.load_model("tomato_model.keras")
+# 🔥 NO cargar modelo al inicio
+model = None
+
 class_names = ["dañado", "viejo", "verde", "maduro"]
 
 @app.get("/")
@@ -24,22 +26,28 @@ def root():
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
+    global model
+
+    # 🔥 cargar modelo solo cuando se use
+    if model is None:
+        model = tf.keras.models.load_model("tomato_model.keras")
+
     # Leer imagen
     contents = await file.read()
     arr = np.frombuffer(contents, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-    # Preprocesar — SIN dividir por 255 (Rescaling está en el modelo)
+    # Preprocesar
     img_input = np.expand_dims(
         cv2.resize(img_rgb, (64, 64)), axis=0
     ).astype(np.float32)
 
     # Predecir
-    pred  = model.predict(img_input, verbose=0)[0]
-    idx   = int(np.argmax(pred))
+    pred = model.predict(img_input, verbose=0)[0]
+    idx = int(np.argmax(pred))
     label = class_names[idx]
-    conf  = float(pred[idx])
+    conf = float(pred[idx])
 
     return {
         "label": label,
@@ -49,3 +57,10 @@ async def predict(file: UploadFile = File(...)):
             for i in range(len(class_names))
         }
     }
+
+# 🔥 importante para Render
+PORT = int(os.environ.get("PORT", 10000))
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
